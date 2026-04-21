@@ -4,6 +4,7 @@ import emitter from '@/lib/emitter'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 900;
 
 export async function GET(req) {
   const session = await getServerSession(authOptions)

@@ -5,6 +5,7 @@ import emitter from '@/lib/emitter'
 import { runChaos } from '@/lib/chaos/orchestrator'
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 900;
 
 export async function POST(req) {
   const session = await getServerSession(authOptions)
