@@ -5,7 +5,7 @@ import emitter from '@/lib/emitter'
 import { runChaos } from '@/lib/chaos/orchestrator'
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 900;
+export const maxDuration = 300;
 
 export async function POST(req) {
   const session = await getServerSession(authOptions)
@@ -32,7 +32,7 @@ export async function POST(req) {
     data: {
       userId: session.user.id,
       repoUrl,
-      status: 'running',
+      status: 'deploying',
     },
   })
 

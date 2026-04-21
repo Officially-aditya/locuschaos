@@ -46,10 +46,9 @@ export default function RunCard({ run }: { run: any }) {
   const handleRerun = async () => {
     setIsSubmitting(true)
 
-    const response = await fetch('/api/run', {
+    const response = await fetch(`/api/runs/${run.id}/chaos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repoUrl: run.repoUrl, envVars: {} }),
     })
 
     const data = await response.json().catch(() => ({}))
@@ -115,7 +114,7 @@ export default function RunCard({ run }: { run: any }) {
           <button
             type="button"
             onClick={handleRerun}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !run.serviceId || !run.serviceUrl}
             className="px-4 py-2 rounded-lg bg-primary-container text-sm font-medium text-on-primary hover:bg-primary transition-colors disabled:opacity-50"
           >
             Re-run Chaos

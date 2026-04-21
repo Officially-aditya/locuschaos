@@ -191,6 +191,10 @@ function getUiStatusFromRun(run: any) {
     return 'idle'
   }
 
+  if (run.status === 'ready' || run.status === 'deploying') {
+    return 'deploying'
+  }
+
   if (run.status === 'running') {
     return isRecord(run.results) && Object.keys(run.results).length > 0 ? 'running' : 'deploying'
   }
@@ -216,6 +220,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
   const [score, setScore] = useState<any>(null)
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [completedRunId, setCompletedRunId] = useState<string | null>(null)
+  const [chaosTriggeringRunId, setChaosTriggeringRunId] = useState<string | null>(null)
   const [hasAttemptedResume, setHasAttemptedResume] = useState(false)
   const [appSettings, setAppSettings] = useState(DEFAULT_APP_SETTINGS)
   const [hasLoadedSettings, setHasLoadedSettings] = useState(false)
@@ -244,6 +249,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
     setScenarios(createScenarioState())
     setScore(null)
     setCompletedRunId(null)
+    setChaosTriggeringRunId(null)
     setLogs([
       createLogEntry({
         type: 'log',
@@ -252,15 +258,18 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
     ])
   }
 
-  const applyPersistedRun = (run: any) => {
-    closeStream()
+  const applyPersistedRun = (run: any, options?: { closeConnection?: boolean }) => {
+    if (options?.closeConnection !== false) {
+      closeStream()
+    }
+
     setActiveRunId(run.id)
     setRepoUrl(run.repoUrl ?? '')
     setStatus(getUiStatusFromRun(run))
     setScenarios(createScenarioStateFromRun(run))
     setLogs(buildLogsFromStoredEvents(run.logEvents))
     setScore(createScoreFromRun(run))
-    setCompletedRunId(run.status === 'running' ? null : run.id)
+    setCompletedRunId(run.status === 'done' || run.status === 'error' ? run.id : null)
   }
 
   const fetchRunDetails = async (runId: string) => {
@@ -353,6 +362,30 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
     return true
   }
 
+  const startChaosForRun = async (runId: string, nextRepoUrl?: string) => {
+    if (chaosTriggeringRunId === runId) {
+      return
+    }
+
+    setChaosTriggeringRunId(runId)
+
+    const response = await fetch(`/api/runs/${runId}/chaos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const data = await response.json().catch(() => ({}))
+    setChaosTriggeringRunId(null)
+
+    if (!response.ok) {
+      appendLog({ type: 'error', message: data.error || 'Unable to start chaos tests on this deployment.' })
+      return
+    }
+
+    setStatus('running')
+    connectToRun(runId, { nextRepoUrl, resume: true })
+  }
+
   const connectToRun = (runId: string, options?: { nextRepoUrl?: string; resume?: boolean }) => {
     closeStream()
     setActiveRunId(runId)
@@ -408,6 +441,11 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
 
       if (event.type === 'score') {
         setScore(event)
+      }
+
+      if (event.type === 'deployment_ready') {
+        appendLog({ type: 'log', message: 'Deployment is live. Starting chaos tests...' })
+        startChaosForRun(runId, options?.nextRepoUrl)
       }
 
       if (event.type === 'done') {
@@ -547,7 +585,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
 
       applyPersistedRun(targetedRun)
 
-      if (targetedRun.status === 'running' && activeRunId !== targetedRun.id) {
+      if ((targetedRun.status === 'running' || targetedRun.status === 'ready' || targetedRun.status === 'deploying') && activeRunId !== targetedRun.id) {
         connectToRun(targetedRun.id, {
           nextRepoUrl: targetedRun.repoUrl,
           resume: true,
@@ -565,6 +603,44 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
   }, [activeRunId, appSettings.autoResumeRuns, hasAttemptedResume, hasLoadedSettings, searchParams, sessionStatus])
 
   useEffect(() => {
+    if (!activeRunId || sessionStatus !== 'authenticated') {
+      return
+    }
+
+    if (status === 'idle' || status === 'done' || status === 'error') {
+      return
+    }
+
+    let cancelled = false
+
+    const syncRun = async () => {
+      const latestRun = await fetchRunDetails(activeRunId)
+
+      if (cancelled || !latestRun) {
+        return
+      }
+
+      applyPersistedRun(latestRun, { closeConnection: false })
+
+      if (latestRun.status === 'ready') {
+        await startChaosForRun(latestRun.id, latestRun.repoUrl)
+      }
+
+      if (latestRun.status === 'done' || latestRun.status === 'error') {
+        closeStream()
+      }
+    }
+
+    syncRun()
+    const interval = window.setInterval(syncRun, 5000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [activeRunId, chaosTriggeringRunId, sessionStatus, status])
+
+  useEffect(() => {
     const runIdFromUrl = searchParams.get('runId')
 
     if (runIdFromUrl || isBusy) {
@@ -578,6 +654,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
     setScenarios(createScenarioState())
     setScore(null)
     setLogs([])
+    setChaosTriggeringRunId(null)
     setHasAttemptedResume(false)
   }, [isBusy, searchParams, status])
 
