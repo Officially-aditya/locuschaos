@@ -32,6 +32,30 @@ function formatStoredLog(log: any) {
   return `[${time}] ${log?.message || 'Unknown event'}`
 }
 
+function getScenarioDisplay(results: Record<string, boolean>, verdicts: Record<string, string>, key: string) {
+  if (key in results) {
+    return {
+      label: results[key] ? 'Passed' : 'Failed',
+      className: results[key] ? 'text-[#00b34d]' : 'text-error',
+      verdict: verdicts[key] || 'No verdict recorded.',
+    }
+  }
+
+  if (verdicts.error) {
+    return {
+      label: 'Blocked',
+      className: 'text-outline',
+      verdict: verdicts.error,
+    }
+  }
+
+  return {
+    label: 'Not run',
+    className: 'text-outline',
+    verdict: verdicts[key] || 'No verdict recorded.',
+  }
+}
+
 export default async function RunReportPage({ params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions)
   const userId = (session?.user as { id?: string } | undefined)?.id
@@ -149,17 +173,21 @@ export default async function RunReportPage({ params }: { params: { id: string }
                   </tr>
                 </thead>
                 <tbody>
-                  {['cold_kill', 'flood', 'env_corrupt', 'db_drop', 'bad_deploy'].map((key) => (
-                    <tr key={key} className="border-t border-outline-variant/10 text-on-surface-variant">
-                      <td className="px-4 py-4 font-medium text-on-surface">{key.replace(/_/g, ' ')}</td>
-                      <td className="px-4 py-4">
-                        <span className={results[key] ? 'text-[#00b34d]' : 'text-error'}>
-                          {results[key] ? 'Passed' : 'Failed'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4">{verdicts[key] || 'No verdict recorded.'}</td>
-                    </tr>
-                  ))}
+                  {['cold_kill', 'flood', 'env_corrupt', 'db_drop', 'bad_deploy'].map((key) => {
+                    const scenarioDisplay = getScenarioDisplay(results, verdicts, key)
+
+                    return (
+                      <tr key={key} className="border-t border-outline-variant/10 text-on-surface-variant">
+                        <td className="px-4 py-4 font-medium text-on-surface">{key.replace(/_/g, ' ')}</td>
+                        <td className="px-4 py-4">
+                          <span className={scenarioDisplay.className}>
+                            {scenarioDisplay.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4">{scenarioDisplay.verdict}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
