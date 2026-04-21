@@ -15,6 +15,15 @@ function createEnvRow() {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     key: '',
     value: '',
+    revealValue: false,
+  }
+}
+
+function createEnvRowWithValues(key = '', value = '') {
+  return {
+    ...createEnvRow(),
+    key,
+    value,
   }
 }
 
@@ -53,6 +62,52 @@ function isRepeatLog(previous: any, next: any) {
 
 function formatAvatarName(name?: string | null, email?: string | null) {
   return (name || email || 'User').slice(0, 1).toUpperCase()
+}
+
+function normalizeEnvValue(value: string) {
+  const trimmed = value.trim()
+
+  if (!trimmed) {
+    return ''
+  }
+
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1)
+  }
+
+  const inlineCommentIndex = trimmed.search(/\s+#/)
+
+  if (inlineCommentIndex !== -1) {
+    return trimmed.slice(0, inlineCommentIndex).trim()
+  }
+
+  return trimmed
+}
+
+function parseEnvPaste(text: string) {
+  const parsedRows = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    .map((line) => line.replace(/^export\s+/, ''))
+    .map((line) => {
+      const separatorIndex = line.indexOf('=')
+
+      if (separatorIndex <= 0) return null
+
+      const key = line.slice(0, separatorIndex).trim()
+      const value = normalizeEnvValue(line.slice(separatorIndex + 1))
+
+      if (!key) return null
+
+      return createEnvRowWithValues(key, value)
+    })
+    .filter(Boolean)
+
+  return parsedRows.length > 0 ? parsedRows : null
 }
 
 export default function LocusChaosApp({ activePath = '/' }: { activePath?: string }) {
@@ -121,8 +176,30 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
     )))
   }
 
+  const toggleEnvValueVisibility = (rowId: string) => {
+    setEnvRows((prev) => prev.map((row) => (
+      row.id === rowId ? { ...row, revealValue: !row.revealValue } : row
+    )))
+  }
+
   const addEnvRow = () => {
     setEnvRows((prev) => [...prev, createEnvRow()])
+  }
+
+  const insertParsedEnvRows = (targetRowId: string, parsedRows: Array<ReturnType<typeof createEnvRow>>) => {
+    setEnvRows((prev) => {
+      const targetIndex = prev.findIndex((row) => row.id === targetRowId)
+
+      if (targetIndex === -1) {
+        return [...prev, ...parsedRows]
+      }
+
+      return [
+        ...prev.slice(0, targetIndex),
+        ...parsedRows,
+        ...prev.slice(targetIndex + 1),
+      ]
+    })
   }
 
   const removeEnvRow = (rowId: string) => {
@@ -160,6 +237,17 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
     }
 
     return nextEnvVars
+  }
+
+  const handleEnvPaste = (rowId: string, pastedText: string) => {
+    const parsedRows = parseEnvPaste(pastedText)
+
+    if (!parsedRows) {
+      return false
+    }
+
+    insertParsedEnvRows(rowId, parsedRows)
+    return true
   }
 
   const connectToRun = (runId: string, options?: { nextRepoUrl?: string; resume?: boolean }) => {
@@ -447,8 +535,8 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
 
                 <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
                   <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_72px] bg-surface-container-low px-4 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-on-surface-variant">
-                    <span>Key</span>
-                    <span>Value</span>
+                    <span>Env Key</span>
+                    <span>Secret Value</span>
                     <span className="text-right">Action</span>
                   </div>
 
@@ -461,15 +549,39 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
                           placeholder="API_KEY"
                           value={row.key}
                           onChange={(event) => updateEnvRow(row.id, 'key', event.target.value)}
+                          onPaste={(event) => {
+                            if (handleEnvPaste(row.id, event.clipboardData.getData('text'))) {
+                              event.preventDefault()
+                            }
+                          }}
                           disabled={isBusy}
                         />
-                        <input
-                          className="min-w-0 rounded-lg border border-outline-variant/30 bg-surface px-3 py-2 text-sm text-on-surface outline-none transition-colors focus:border-primary-container"
-                          placeholder="secret value"
-                          value={row.value}
-                          onChange={(event) => updateEnvRow(row.id, 'value', event.target.value)}
-                          disabled={isBusy}
-                        />
+                        <div className="relative min-w-0">
+                          <input
+                            type={row.revealValue ? 'text' : 'password'}
+                            className="w-full min-w-0 rounded-lg border border-outline-variant/30 bg-surface px-3 py-2 pr-11 text-sm text-on-surface outline-none transition-colors focus:border-primary-container"
+                            placeholder="secret value"
+                            value={row.value}
+                            onChange={(event) => updateEnvRow(row.id, 'value', event.target.value)}
+                            onPaste={(event) => {
+                              if (handleEnvPaste(row.id, event.clipboardData.getData('text'))) {
+                                event.preventDefault()
+                              }
+                            }}
+                            disabled={isBusy}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => toggleEnvValueVisibility(row.id)}
+                            disabled={isBusy}
+                            className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center text-outline hover:text-on-surface disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            aria-label={row.revealValue ? `Hide value for environment row ${index + 1}` : `Show value for environment row ${index + 1}`}
+                          >
+                            <span className="material-symbols-outlined text-[18px]">
+                              {row.revealValue ? 'visibility_off' : 'visibility'}
+                            </span>
+                          </button>
+                        </div>
                         <div className="flex items-center justify-end">
                           <button
                             type="button"
