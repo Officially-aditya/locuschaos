@@ -180,7 +180,7 @@ export default function LocusChaosApp() {
     if (!repoUrl) return
 
     if (!sessionUserId) {
-      signIn('github', { callbackUrl: '/' })
+      router.push('/login')
       return
     }
 
@@ -309,7 +309,7 @@ export default function LocusChaosApp() {
             ) : (
               <button
                 type="button"
-                onClick={() => signIn('github', { callbackUrl: '/' })}
+                onClick={() => router.push('/login')}
                 className="px-4 py-2 rounded-lg bg-primary-container text-sm font-medium text-on-primary hover:bg-primary transition-colors"
               >
                 Sign in

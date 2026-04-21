@@ -1,6 +1,8 @@
 'use client'
 
-import { signIn } from 'next-auth/react'
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { getProviders, signIn } from 'next-auth/react'
 
 function GitHubIcon() {
   return (
@@ -11,6 +13,28 @@ function GitHubIcon() {
 }
 
 export default function LoginPage() {
+  const [isLoading, setIsLoading] = useState(true)
+  const [githubEnabled, setGithubEnabled] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadProviders = async () => {
+      const providers = await getProviders().catch(() => null)
+
+      if (cancelled) return
+
+      setGithubEnabled(Boolean(providers?.github))
+      setIsLoading(false)
+    }
+
+    loadProviders()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <main className="min-h-screen w-full bg-[#0f0f14] flex items-center justify-center px-6">
       <div className="text-center space-y-6">
@@ -19,12 +43,21 @@ export default function LoginPage() {
         </h1>
         <p className="text-gray-400">Break your app before production does.</p>
         <button
-          onClick={() => signIn('github', { callbackUrl: '/dashboard' })}
-          className="flex items-center gap-3 bg-white text-black px-6 py-3 rounded-lg font-medium hover:bg-gray-100 transition mx-auto"
+          onClick={() => githubEnabled && signIn('github', { callbackUrl: '/dashboard' })}
+          disabled={!githubEnabled || isLoading}
+          className="flex items-center gap-3 bg-white text-black px-6 py-3 rounded-lg font-medium hover:bg-gray-100 transition mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <GitHubIcon />
-          Continue with GitHub
+          {isLoading ? 'Checking sign-in...' : githubEnabled ? 'Continue with GitHub' : 'GitHub login unavailable'}
         </button>
+        {!isLoading && !githubEnabled && (
+          <div className="space-y-2">
+            <p className="text-sm text-red-300">GitHub OAuth is not configured on this deployment yet.</p>
+            <Link href="/" className="text-sm text-gray-300 hover:text-white transition-colors">
+              Return to home
+            </Link>
+          </div>
+        )}
       </div>
     </main>
   )
