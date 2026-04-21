@@ -22,6 +22,16 @@ function gradeClasses(grade?: string | null) {
   return classes[grade || ''] || 'text-on-surface'
 }
 
+function formatStoredLog(log: any) {
+  const time = log?.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '--:--:--'
+
+  if (log?.type === 'api_call') {
+    return `[${time}] Locus API: ${log.method} ${log.endpoint}`
+  }
+
+  return `[${time}] ${log?.message || 'Unknown event'}`
+}
+
 export default async function RunReportPage({ params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions)
   const userId = (session?.user as { id?: string } | undefined)?.id
@@ -43,6 +53,7 @@ export default async function RunReportPage({ params }: { params: { id: string }
 
   const results = (run.results as Record<string, boolean> | null) ?? {}
   const verdicts = (run.verdicts as Record<string, string> | null) ?? {}
+  const logEvents = Array.isArray(run.logEvents) ? run.logEvents : []
 
   return (
     <>
@@ -74,7 +85,10 @@ export default async function RunReportPage({ params }: { params: { id: string }
                 <div>Status: <span className="text-on-surface">{run.status}</span></div>
                 <div>Created: <span className="text-on-surface">{formatDate(run.createdAt)}</span></div>
                 <div>Completed: <span className="text-on-surface">{formatDate(run.completedAt)}</span></div>
+                <div>Project ID: <span className="text-on-surface">{run.projectId || '—'}</span></div>
+                <div>Environment ID: <span className="text-on-surface">{run.environmentId || '—'}</span></div>
                 <div>Service ID: <span className="text-on-surface">{run.serviceId || '—'}</span></div>
+                <div>Database ID: <span className="text-on-surface">{run.dbId || '—'}</span></div>
                 <div>
                   Service URL:{' '}
                   {run.serviceUrl ? (
@@ -103,6 +117,24 @@ export default async function RunReportPage({ params }: { params: { id: string }
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-6 shadow-[0_12px_40px_rgba(27,0,99,0.06)]">
+            <div className="flex items-center justify-between gap-4 mb-5">
+              <h2 className="font-headline text-xl font-bold text-on-surface">Stored Run Logs</h2>
+              <span className="text-xs font-medium uppercase tracking-wider text-outline">{logEvents.length} events saved</span>
+            </div>
+            {logEvents.length === 0 ? (
+              <p className="text-sm text-on-surface-variant">No persistent logs were captured for this run.</p>
+            ) : (
+              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest max-h-[360px] overflow-y-auto p-4 font-mono text-xs text-on-surface-variant space-y-2">
+                {logEvents.map((log: any, index: number) => (
+                  <div key={`${log.timestamp ?? index}-${index}`} className={log?.type === 'error' ? 'text-error' : ''}>
+                    {formatStoredLog(log)}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-6 shadow-[0_12px_40px_rgba(27,0,99,0.06)]">

@@ -23,8 +23,8 @@ export async function POST(req, { params }) {
     return Response.json({ error: 'Not found' }, { status: 404 })
   }
 
-  if (!run.serviceId) {
-    return Response.json({ error: 'Run has no service to tear down' }, { status: 400 })
+  if (!run.projectId && !run.serviceId) {
+    return Response.json({ error: 'Run has no project or service to tear down' }, { status: 400 })
   }
 
   const locusApiKey = process.env.LOCUS_API_KEY
@@ -34,7 +34,12 @@ export async function POST(req, { params }) {
   }
 
   const locus = createLocusClient(locusApiKey, () => {})
-  await locus.deleteService(run.serviceId)
+
+  if (run.projectId) {
+    await locus.deleteProject(run.projectId)
+  } else if (run.serviceId) {
+    await locus.deleteService(run.serviceId)
+  }
 
   await prisma.run.update({
     where: { id: run.id },

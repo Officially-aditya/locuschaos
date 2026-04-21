@@ -6,17 +6,17 @@ import { authOptions } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-export default async function Page() {
+export default async function NewRunPage() {
   const session = await getServerSession(authOptions)
   const userId = (session?.user as { id?: string } | undefined)?.id
 
-  if (userId) {
-    redirect('/dashboard')
+  if (!userId) {
+    redirect('/login')
   }
 
   return (
     <Suspense fallback={null}>
-      <LocusChaosApp activePath="/" />
+      <LocusChaosApp activePath="/new-run" />
     </Suspense>
   )
 }

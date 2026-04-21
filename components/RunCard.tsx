@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { APP_SETTINGS_STORAGE_KEY, DEFAULT_APP_SETTINGS } from '@/lib/app-settings'
 
 function getGradeClasses(grade?: string | null, status?: string) {
   if (status === 'running') return 'bg-surface text-outline animate-pulse'
@@ -25,6 +26,22 @@ function formatDate(value: string) {
 export default function RunCard({ run }: { run: any }) {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [confirmDestructiveActions, setConfirmDestructiveActions] = useState(DEFAULT_APP_SETTINGS.confirmDestructiveActions)
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(APP_SETTINGS_STORAGE_KEY)
+
+      if (!stored) return
+
+      const parsed = JSON.parse(stored)
+      setConfirmDestructiveActions(
+        typeof parsed.confirmDestructiveActions === 'boolean'
+          ? parsed.confirmDestructiveActions
+          : DEFAULT_APP_SETTINGS.confirmDestructiveActions
+      )
+    } catch {}
+  }, [])
 
   const handleRerun = async () => {
     setIsSubmitting(true)
@@ -45,6 +62,18 @@ export default function RunCard({ run }: { run: any }) {
   }
 
   const handleTeardown = async () => {
+    if (confirmDestructiveActions) {
+      const confirmed = window.confirm(
+        run.projectId
+          ? 'Delete this Locus project and all of its linked resources?'
+          : 'Tear down this deployed service?'
+      )
+
+      if (!confirmed) {
+        return
+      }
+    }
+
     setIsSubmitting(true)
     await fetch(`/api/runs/${run.id}/teardown`, { method: 'POST' })
     setIsSubmitting(false)
@@ -74,6 +103,7 @@ export default function RunCard({ run }: { run: any }) {
 
           <div className="flex flex-wrap gap-5 text-sm text-on-surface-variant">
             <span>{run.points ?? '—'} points</span>
+            <span>{run.projectId ? 'Project-backed deploy' : run.serviceId ? 'Service-only deploy' : 'No live deploy recorded'}</span>
             <span>{run.completedAt ? `Completed ${formatDate(run.completedAt)}` : 'Still in progress'}</span>
           </div>
         </div>
@@ -90,14 +120,14 @@ export default function RunCard({ run }: { run: any }) {
           >
             Re-run Chaos
           </button>
-          {run.status === 'done' && run.serviceId && (
+          {run.status === 'done' && (run.projectId || run.serviceId) && (
             <button
               type="button"
               onClick={handleTeardown}
               disabled={isSubmitting}
               className="px-4 py-2 rounded-lg bg-error/10 text-sm font-medium text-error hover:bg-error/15 transition-colors disabled:opacity-50"
             >
-              Teardown
+              {run.projectId ? 'Delete Project' : 'Teardown Service'}
             </button>
           )}
         </div>

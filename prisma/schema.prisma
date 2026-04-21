@@ -55,19 +55,23 @@ model VerificationToken {
 }
 
 model Run {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  repoUrl     String
-  serviceId   String?
-  serviceUrl  String?
-  grade       String?
-  points      Int?
-  status      String    @default("running")
-  results     Json?
-  verdicts    Json?
-  createdAt   DateTime  @default(now())
-  completedAt DateTime?
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repoUrl       String
+  projectId     String?
+  environmentId String?
+  serviceId     String?
+  serviceUrl    String?
+  dbId          String?
+  grade         String?
+  points        Int?
+  status        String    @default("running")
+  results       Json?
+  verdicts      Json?
+  logEvents     Json?
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
 
   @@index([userId])
 }

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { getProviders, signIn } from 'next-auth/react'
+import { getProviders, signIn, useSession } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 
 function GitHubIcon() {
   return (
@@ -13,8 +14,16 @@ function GitHubIcon() {
 }
 
 export default function LoginPage() {
+  const router = useRouter()
+  const { status } = useSession()
   const [isLoading, setIsLoading] = useState(true)
   const [githubEnabled, setGithubEnabled] = useState(false)
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      router.replace('/dashboard')
+    }
+  }, [router, status])
 
   useEffect(() => {
     let cancelled = false

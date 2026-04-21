@@ -8,6 +8,15 @@ import Sidebar from '@/components/Sidebar'
 import ScenarioRow from '@/components/ScenarioRow'
 import LogFeed from '@/components/LogFeed'
 import ScoreCard from '@/components/ScoreCard'
+import { APP_SETTINGS_STORAGE_KEY, DEFAULT_APP_SETTINGS, ENV_DRAFT_STORAGE_KEY } from '@/lib/app-settings'
+
+function createEnvRow() {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    key: '',
+    value: '',
+  }
+}
 
 function createScenarioState() {
   return {
@@ -46,14 +55,14 @@ function formatAvatarName(name?: string | null, email?: string | null) {
   return (name || email || 'User').slice(0, 1).toUpperCase()
 }
 
-export default function LocusChaosApp() {
+export default function LocusChaosApp({ activePath = '/' }: { activePath?: string }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { data: session, status: sessionStatus } = useSession()
   const sessionUserId = (session?.user as { id?: string } | undefined)?.id
 
   const [repoUrl, setRepoUrl] = useState('')
-  const [envVars, setEnvVars] = useState('')
+  const [envRows, setEnvRows] = useState([createEnvRow()])
   const [status, setStatus] = useState<'idle' | 'deploying' | 'running' | 'done'>('idle')
   const [scenarios, setScenarios] = useState<Record<string, any>>(createScenarioState)
   const [logs, setLogs] = useState<any[]>([])
@@ -61,6 +70,8 @@ export default function LocusChaosApp() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [completedRunId, setCompletedRunId] = useState<string | null>(null)
   const [hasAttemptedResume, setHasAttemptedResume] = useState(false)
+  const [appSettings, setAppSettings] = useState(DEFAULT_APP_SETTINGS)
+  const [hasLoadedSettings, setHasLoadedSettings] = useState(false)
   const eventSource = useRef<EventSource | null>(null)
 
   const appendLog = (event: any) => {
@@ -102,6 +113,53 @@ export default function LocusChaosApp() {
         message: nextRepoUrl ? `Preparing run for ${nextRepoUrl}...` : 'Preparing run...',
       }),
     ])
+  }
+
+  const updateEnvRow = (rowId: string, field: 'key' | 'value', nextValue: string) => {
+    setEnvRows((prev) => prev.map((row) => (
+      row.id === rowId ? { ...row, [field]: nextValue } : row
+    )))
+  }
+
+  const addEnvRow = () => {
+    setEnvRows((prev) => [...prev, createEnvRow()])
+  }
+
+  const removeEnvRow = (rowId: string) => {
+    setEnvRows((prev) => {
+      if (prev.length === 1) {
+        return [{ ...prev[0], key: '', value: '' }]
+      }
+
+      return prev.filter((row) => row.id !== rowId)
+    })
+  }
+
+  const buildEnvObject = () => {
+    const nextEnvVars: Record<string, string> = {}
+    const seenKeys = new Set<string>()
+
+    for (const row of envRows) {
+      const key = row.key.trim()
+      const value = row.value
+
+      if (!key && !value.trim()) {
+        continue
+      }
+
+      if (!key || !value.trim()) {
+        throw new Error('Each environment row needs both a key and a value.')
+      }
+
+      if (seenKeys.has(key)) {
+        throw new Error(`Duplicate environment key: ${key}`)
+      }
+
+      seenKeys.add(key)
+      nextEnvVars[key] = value
+    }
+
+    return nextEnvVars
   }
 
   const connectToRun = (runId: string, options?: { nextRepoUrl?: string; resume?: boolean }) => {
@@ -186,13 +244,11 @@ export default function LocusChaosApp() {
 
     let parsedEnvVars = {}
 
-    if (envVars.trim()) {
-      try {
-        parsedEnvVars = JSON.parse(envVars)
-      } catch {
-        setLogs([createLogEntry({ type: 'error', message: 'Environment variables must be valid JSON.' })])
-        return
-      }
+    try {
+      parsedEnvVars = buildEnvObject()
+    } catch (error: any) {
+      setLogs([createLogEntry({ type: 'error', message: error.message })])
+      return
     }
 
     resetRunUi(repoUrl)
@@ -221,6 +277,33 @@ export default function LocusChaosApp() {
   }
 
   useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(APP_SETTINGS_STORAGE_KEY)
+      const nextSettings = stored ? { ...DEFAULT_APP_SETTINGS, ...JSON.parse(stored) } : DEFAULT_APP_SETTINGS
+
+      setAppSettings(nextSettings)
+
+      if (!repoUrl && nextSettings.defaultRepoUrl) {
+        setRepoUrl(nextSettings.defaultRepoUrl)
+      }
+
+      if (nextSettings.persistEnvDraft) {
+        const savedDraft = window.localStorage.getItem(ENV_DRAFT_STORAGE_KEY)
+
+        if (savedDraft) {
+          const parsedRows = JSON.parse(savedDraft)
+
+          if (Array.isArray(parsedRows) && parsedRows.length > 0) {
+            setEnvRows(parsedRows)
+          }
+        }
+      }
+    } catch {}
+
+    setHasLoadedSettings(true)
+  }, [])
+
+  useEffect(() => {
     return () => {
       closeStream()
     }
@@ -229,7 +312,7 @@ export default function LocusChaosApp() {
   useEffect(() => {
     const runIdFromUrl = searchParams.get('runId')
 
-    if (sessionStatus !== 'authenticated' || hasAttemptedResume) return
+    if (sessionStatus !== 'authenticated' || hasAttemptedResume || !hasLoadedSettings || !appSettings.autoResumeRuns) return
 
     let cancelled = false
 
@@ -269,13 +352,24 @@ export default function LocusChaosApp() {
     return () => {
       cancelled = true
     }
-  }, [activeRunId, hasAttemptedResume, searchParams, sessionStatus])
+  }, [activeRunId, appSettings.autoResumeRuns, hasAttemptedResume, hasLoadedSettings, searchParams, sessionStatus])
+
+  useEffect(() => {
+    if (!hasLoadedSettings) return
+
+    if (appSettings.persistEnvDraft) {
+      window.localStorage.setItem(ENV_DRAFT_STORAGE_KEY, JSON.stringify(envRows))
+      return
+    }
+
+    window.localStorage.removeItem(ENV_DRAFT_STORAGE_KEY)
+  }, [appSettings.persistEnvDraft, envRows, hasLoadedSettings])
 
   const isBusy = status === 'deploying' || status === 'running'
 
   return (
     <>
-      <Sidebar activePath="/" />
+      <Sidebar activePath={activePath} />
 
       <main className="ml-0 md:ml-64 flex-1 h-full flex flex-col p-6 md:p-8 gap-8 overflow-y-auto bg-surface relative z-10">
         <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -338,16 +432,59 @@ export default function LocusChaosApp() {
               </div>
 
               <div className="space-y-2 pt-2">
-                <label className="block font-label font-medium text-sm text-on-surface uppercase tracking-wider" htmlFor="env_vars">Environment Variables (JSON)</label>
-                <textarea
-                  className="w-full p-4 bg-surface-container-lowest rounded border border-outline-variant/40 focus:ring-0 focus:border-primary-container focus:border-2 border-2 border-transparent text-on-surface font-body outline-none transition-colors font-mono text-sm"
-                  id="env_vars"
-                  placeholder='{"API_URL": "https://api.example.com", "SECRET_KEY": "secret"}'
-                  rows={5}
-                  value={envVars}
-                  onChange={(event) => setEnvVars(event.target.value)}
-                  disabled={isBusy}
-                />
+                <div className="flex items-center justify-between gap-4">
+                  <label className="block font-label font-medium text-sm text-on-surface uppercase tracking-wider" htmlFor="env_key_0">Environment Variables</label>
+                  <button
+                    type="button"
+                    onClick={addEnvRow}
+                    disabled={isBusy}
+                    className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/20 px-3 py-2 text-xs font-medium text-primary-container hover:border-primary-container/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-base">add</span>
+                    Add Row
+                  </button>
+                </div>
+
+                <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_72px] bg-surface-container-low px-4 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-on-surface-variant">
+                    <span>Key</span>
+                    <span>Value</span>
+                    <span className="text-right">Action</span>
+                  </div>
+
+                  <div className="divide-y divide-outline-variant/10">
+                    {envRows.map((row, index) => (
+                      <div key={row.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_72px] gap-3 bg-surface-container-lowest px-4 py-3">
+                        <input
+                          id={`env_key_${index}`}
+                          className="min-w-0 rounded-lg border border-outline-variant/30 bg-surface px-3 py-2 text-sm text-on-surface outline-none transition-colors focus:border-primary-container"
+                          placeholder="API_KEY"
+                          value={row.key}
+                          onChange={(event) => updateEnvRow(row.id, 'key', event.target.value)}
+                          disabled={isBusy}
+                        />
+                        <input
+                          className="min-w-0 rounded-lg border border-outline-variant/30 bg-surface px-3 py-2 text-sm text-on-surface outline-none transition-colors focus:border-primary-container"
+                          placeholder="secret value"
+                          value={row.value}
+                          onChange={(event) => updateEnvRow(row.id, 'value', event.target.value)}
+                          disabled={isBusy}
+                        />
+                        <div className="flex items-center justify-end">
+                          <button
+                            type="button"
+                            onClick={() => removeEnvRow(row.id)}
+                            disabled={isBusy}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-outline hover:bg-surface hover:text-error disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            aria-label={`Remove environment row ${index + 1}`}
+                          >
+                            <span className="material-symbols-outlined text-base">delete</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="pt-4 flex flex-col gap-3">

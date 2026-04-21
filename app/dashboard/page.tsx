@@ -30,7 +30,7 @@ export default async function DashboardPage() {
               <h1 className="font-headline text-3xl font-black tracking-tight text-on-surface">Run History</h1>
               <p className="font-body text-sm text-on-surface-variant mt-2">Every deployment, grade, and teardown state tied to your account.</p>
             </div>
-            <a href="/" className="inline-flex items-center justify-center rounded-lg bg-primary-container px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary transition-colors">
+            <a href="/new-run" className="inline-flex items-center justify-center rounded-lg bg-primary-container px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary transition-colors">
               + New Run
             </a>
           </div>

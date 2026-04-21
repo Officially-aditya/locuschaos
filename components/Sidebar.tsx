@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 export default function Sidebar({ activePath = '/' }: { activePath?: string }) {
   const navItems = [
-    { name: 'New Run', path: '/', icon: 'dashboard' },
+    { name: 'New Run', path: '/new-run', icon: 'dashboard' },
     { name: 'History', path: '/dashboard', icon: 'history' },
     { name: 'Chaos Tests', path: '/chaos-tests', icon: 'bolt' },
     { name: 'Deployments', path: '/deployments', icon: 'rocket_launch' },
@@ -33,7 +33,7 @@ export default function Sidebar({ activePath = '/' }: { activePath?: string }) {
         })}
       </div>
       <div className="px-4 mt-auto">
-        <Link href="/">
+        <Link href="/new-run">
             <button 
             type="button"
             className="w-full py-3 px-4 bg-primary-container text-on-primary rounded-lg font-body font-medium text-sm hover:bg-primary transition-all shadow-[0_12px_40px_rgba(27,0,99,0.06)] hover:shadow-[0_20px_40px_rgba(27,0,99,0.12)]">

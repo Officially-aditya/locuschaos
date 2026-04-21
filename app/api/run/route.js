@@ -19,6 +19,10 @@ export async function POST(req) {
     return Response.json({ error: 'Missing repoUrl' }, { status: 400 })
   }
 
+  if (typeof envVars !== 'object' || envVars === null || Array.isArray(envVars)) {
+    return Response.json({ error: 'envVars must be a plain object' }, { status: 400 })
+  }
+
   if (!locusApiKey) {
     return Response.json({ error: 'LOCUS_API_KEY not configured on server' }, { status: 500 })
   }
