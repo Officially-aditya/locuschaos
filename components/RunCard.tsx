@@ -57,7 +57,7 @@ export default function RunCard({ run }: { run: any }) {
 
     if (!response.ok || !data.runId) return
 
-    router.push(`/?runId=${data.runId}`)
+    router.push(`/new-run?runId=${data.runId}`)
     router.refresh()
   }
 

@@ -38,7 +38,7 @@ function createScenarioState() {
 }
 
 function createLogEntry(event: any) {
-  const timestamp = Date.now()
+  const timestamp = event.timestamp ?? Date.now()
 
   return {
     ...event,
@@ -48,6 +48,25 @@ function createLogEntry(event: any) {
     lastTimestamp: timestamp,
     repeats: 1,
   }
+}
+
+function appendLogEntry(previousLogs: any[], event: any) {
+  const nextLog = createLogEntry(event)
+  const latestLog = previousLogs[0]
+
+  if (isRepeatLog(latestLog, nextLog)) {
+    return [
+      {
+        ...latestLog,
+        timestamp: nextLog.timestamp,
+        lastTimestamp: nextLog.timestamp,
+        repeats: latestLog.repeats + 1,
+      },
+      ...previousLogs.slice(1),
+    ]
+  }
+
+  return [nextLog, ...previousLogs]
 }
 
 function isRepeatLog(previous: any, next: any) {
@@ -110,6 +129,82 @@ function parseEnvPaste(text: string) {
   return parsedRows.length > 0 ? parsedRows : null
 }
 
+function isRecord(value: any) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function buildLogsFromStoredEvents(events: any) {
+  if (!Array.isArray(events)) {
+    return []
+  }
+
+  return events.reduce((nextLogs, event) => appendLogEntry(nextLogs, event), [])
+}
+
+function createScenarioStateFromRun(run: any) {
+  const nextScenarios = createScenarioState()
+  const results = isRecord(run?.results) ? run.results : {}
+  const verdicts = isRecord(run?.verdicts) ? run.verdicts : {}
+
+  Object.keys(nextScenarios).forEach((key) => {
+    if (!(key in results)) {
+      if (run?.status === 'running') {
+        nextScenarios[key] = { ...nextScenarios[key], status: 'running' }
+      }
+      return
+    }
+
+    nextScenarios[key] = {
+      ...nextScenarios[key],
+      status: results[key] ? 'passed' : 'failed',
+      detail: verdicts[key] ?? null,
+    }
+  })
+
+  if (run?.status === 'error' && verdicts.error) {
+    const firstScenarioKey = Object.keys(nextScenarios).find((key) => nextScenarios[key].status === 'queued')
+
+    if (firstScenarioKey) {
+      nextScenarios[firstScenarioKey] = {
+        ...nextScenarios[firstScenarioKey],
+        status: 'failed',
+        detail: verdicts.error,
+      }
+    }
+  }
+
+  return nextScenarios
+}
+
+function createScoreFromRun(run: any) {
+  if (!run?.grade || typeof run?.points !== 'number') {
+    return null
+  }
+
+  return {
+    grade: run.grade,
+    points: run.points,
+    total: 100,
+    verdicts: isRecord(run.verdicts) ? run.verdicts : {},
+  }
+}
+
+function getUiStatusFromRun(run: any) {
+  if (!run) {
+    return 'idle'
+  }
+
+  if (run.status === 'running') {
+    return isRecord(run.results) && Object.keys(run.results).length > 0 ? 'running' : 'deploying'
+  }
+
+  if (run.status === 'error') {
+    return 'error'
+  }
+
+  return 'done'
+}
+
 export default function LocusChaosApp({ activePath = '/' }: { activePath?: string }) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -118,7 +213,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
 
   const [repoUrl, setRepoUrl] = useState('')
   const [envRows, setEnvRows] = useState([createEnvRow()])
-  const [status, setStatus] = useState<'idle' | 'deploying' | 'running' | 'done'>('idle')
+  const [status, setStatus] = useState<'idle' | 'deploying' | 'running' | 'done' | 'error'>('idle')
   const [scenarios, setScenarios] = useState<Record<string, any>>(createScenarioState)
   const [logs, setLogs] = useState<any[]>([])
   const [score, setScore] = useState<any>(null)
@@ -128,32 +223,21 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
   const [appSettings, setAppSettings] = useState(DEFAULT_APP_SETTINGS)
   const [hasLoadedSettings, setHasLoadedSettings] = useState(false)
   const eventSource = useRef<EventSource | null>(null)
+  const reconnectTimeout = useRef<number | null>(null)
 
   const appendLog = (event: any) => {
-    setLogs((prev) => {
-      const nextLog = createLogEntry(event)
-      const latestLog = prev[0]
-
-      if (isRepeatLog(latestLog, nextLog)) {
-        return [
-          {
-            ...latestLog,
-            timestamp: nextLog.timestamp,
-            lastTimestamp: nextLog.timestamp,
-            repeats: latestLog.repeats + 1,
-          },
-          ...prev.slice(1),
-        ]
-      }
-
-      return [nextLog, ...prev]
-    })
+    setLogs((prev) => appendLogEntry(prev, event))
   }
 
   const closeStream = () => {
     if (eventSource.current) {
       eventSource.current.close()
       eventSource.current = null
+    }
+
+    if (reconnectTimeout.current) {
+      window.clearTimeout(reconnectTimeout.current)
+      reconnectTimeout.current = null
     }
   }
 
@@ -168,6 +252,27 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
         message: nextRepoUrl ? `Preparing run for ${nextRepoUrl}...` : 'Preparing run...',
       }),
     ])
+  }
+
+  const applyPersistedRun = (run: any) => {
+    closeStream()
+    setActiveRunId(run.id)
+    setRepoUrl(run.repoUrl ?? '')
+    setStatus(getUiStatusFromRun(run))
+    setScenarios(createScenarioStateFromRun(run))
+    setLogs(buildLogsFromStoredEvents(run.logEvents))
+    setScore(createScoreFromRun(run))
+    setCompletedRunId(run.status === 'running' ? null : run.id)
+  }
+
+  const fetchRunDetails = async (runId: string) => {
+    const response = await fetch(`/api/runs/${runId}`, { cache: 'no-store' })
+
+    if (!response.ok) {
+      return null
+    }
+
+    return response.json()
   }
 
   const updateEnvRow = (rowId: string, field: 'key' | 'value', nextValue: string) => {
@@ -259,7 +364,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
     }
 
     if (options?.resume) {
-      setStatus('deploying')
+      setStatus((currentStatus) => currentStatus === 'running' ? 'running' : 'deploying')
       setCompletedRunId(null)
       appendLog({ type: 'log', message: `Reconnected to in-progress run ${runId}.` })
     }
@@ -314,9 +419,29 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
       }
     }
 
-    es.onerror = () => {
+    es.onerror = async () => {
       es.close()
-      appendLog({ type: 'error', message: 'Live run connection dropped. Reload to reconnect.' })
+      eventSource.current = null
+
+      const latestRun = await fetchRunDetails(runId)
+
+      if (!latestRun) {
+        appendLog({ type: 'error', message: 'Live run connection dropped. We could not reload the latest run state.' })
+        return
+      }
+
+      if (latestRun.status === 'running') {
+        appendLog({ type: 'log', message: 'Live run connection dropped. Reconnecting…' })
+        reconnectTimeout.current = window.setTimeout(() => {
+          connectToRun(runId, {
+            nextRepoUrl: latestRun.repoUrl,
+            resume: true,
+          })
+        }, 1500)
+        return
+      }
+
+      applyPersistedRun(latestRun)
     }
   }
 
@@ -360,7 +485,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
       return
     }
 
-    router.replace(`/?runId=${data.runId}`)
+    router.replace(`/new-run?runId=${data.runId}`)
     connectToRun(data.runId, { nextRepoUrl: repoUrl })
   }
 
@@ -405,6 +530,30 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
     let cancelled = false
 
     const resumeRun = async () => {
+      if (runIdFromUrl) {
+        const targetedRun = await fetchRunDetails(runIdFromUrl)
+
+        if (cancelled) {
+          return
+        }
+
+        if (targetedRun) {
+          if (targetedRun.status === 'running' && activeRunId !== targetedRun.id) {
+            setRepoUrl(targetedRun.repoUrl)
+            setStatus('deploying')
+            connectToRun(targetedRun.id, {
+              nextRepoUrl: targetedRun.repoUrl,
+              resume: true,
+            })
+          } else {
+            applyPersistedRun(targetedRun)
+          }
+
+          setHasAttemptedResume(true)
+          return
+        }
+      }
+
       const response = await fetch('/api/runs?limit=10')
 
       if (!response.ok || cancelled) {
@@ -428,8 +577,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
       }
 
       if (targetedRun?.status === 'done') {
-        setCompletedRunId(targetedRun.id)
-        setRepoUrl(targetedRun.repoUrl)
+        applyPersistedRun(targetedRun)
       }
 
       setHasAttemptedResume(true)
