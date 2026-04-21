@@ -148,9 +148,6 @@ function createScenarioStateFromRun(run: any) {
 
   Object.keys(nextScenarios).forEach((key) => {
     if (!(key in results)) {
-      if (run?.status === 'running') {
-        nextScenarios[key] = { ...nextScenarios[key], status: 'running' }
-      }
       return
     }
 
@@ -224,6 +221,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
   const [hasLoadedSettings, setHasLoadedSettings] = useState(false)
   const eventSource = useRef<EventSource | null>(null)
   const reconnectTimeout = useRef<number | null>(null)
+  const isBusy = status === 'deploying' || status === 'running'
 
   const appendLog = (event: any) => {
     setLogs((prev) => appendLogEntry(prev, event))
@@ -431,6 +429,7 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
       }
 
       if (latestRun.status === 'running') {
+        applyPersistedRun(latestRun)
         appendLog({ type: 'log', message: 'Live run connection dropped. Reconnecting…' })
         reconnectTimeout.current = window.setTimeout(() => {
           connectToRun(runId, {
@@ -530,54 +529,29 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
     let cancelled = false
 
     const resumeRun = async () => {
-      if (runIdFromUrl) {
-        const targetedRun = await fetchRunDetails(runIdFromUrl)
-
-        if (cancelled) {
-          return
-        }
-
-        if (targetedRun) {
-          if (targetedRun.status === 'running' && activeRunId !== targetedRun.id) {
-            setRepoUrl(targetedRun.repoUrl)
-            setStatus('deploying')
-            connectToRun(targetedRun.id, {
-              nextRepoUrl: targetedRun.repoUrl,
-              resume: true,
-            })
-          } else {
-            applyPersistedRun(targetedRun)
-          }
-
-          setHasAttemptedResume(true)
-          return
-        }
-      }
-
-      const response = await fetch('/api/runs?limit=10')
-
-      if (!response.ok || cancelled) {
+      if (!runIdFromUrl) {
         setHasAttemptedResume(true)
         return
       }
 
-      const runs = await response.json()
-      const targetedRun = runIdFromUrl ? runs.find((run: any) => run.id === runIdFromUrl) : null
-      const runToResume = targetedRun?.status === 'running'
-        ? targetedRun
-        : runs.find((run: any) => run.status === 'running')
+      const targetedRun = await fetchRunDetails(runIdFromUrl)
 
-      if (runToResume && activeRunId !== runToResume.id) {
-        setRepoUrl(runToResume.repoUrl)
-        setStatus('deploying')
-        connectToRun(runToResume.id, {
-          nextRepoUrl: runToResume.repoUrl,
-          resume: true,
-        })
+      if (cancelled) {
+        return
       }
 
-      if (targetedRun?.status === 'done') {
-        applyPersistedRun(targetedRun)
+      if (!targetedRun) {
+        setHasAttemptedResume(true)
+        return
+      }
+
+      applyPersistedRun(targetedRun)
+
+      if (targetedRun.status === 'running' && activeRunId !== targetedRun.id) {
+        connectToRun(targetedRun.id, {
+          nextRepoUrl: targetedRun.repoUrl,
+          resume: true,
+        })
       }
 
       setHasAttemptedResume(true)
@@ -591,6 +565,23 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
   }, [activeRunId, appSettings.autoResumeRuns, hasAttemptedResume, hasLoadedSettings, searchParams, sessionStatus])
 
   useEffect(() => {
+    const runIdFromUrl = searchParams.get('runId')
+
+    if (runIdFromUrl || isBusy) {
+      return
+    }
+
+    closeStream()
+    setActiveRunId(null)
+    setCompletedRunId(null)
+    setStatus('idle')
+    setScenarios(createScenarioState())
+    setScore(null)
+    setLogs([])
+    setHasAttemptedResume(false)
+  }, [isBusy, searchParams, status])
+
+  useEffect(() => {
     if (!hasLoadedSettings) return
 
     if (appSettings.persistEnvDraft) {
@@ -600,8 +591,6 @@ export default function LocusChaosApp({ activePath = '/' }: { activePath?: strin
 
     window.localStorage.removeItem(ENV_DRAFT_STORAGE_KEY)
   }, [appSettings.persistEnvDraft, envRows, hasLoadedSettings])
-
-  const isBusy = status === 'deploying' || status === 'running'
 
   return (
     <>
