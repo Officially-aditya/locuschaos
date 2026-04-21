@@ -1,0 +1,11 @@
+{
+  "name": "hardened-app",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "pg": "^8.11.0"
+  }
+}
